@@ -340,8 +340,8 @@ func OnSupervisorDone(sup *suture.Supervisor, fn func()) {
 
 func Spec() suture.Spec {
 	return suture.Spec{
-		PassThroughPanics:    true,
-		PropagateTermination: true,
+		PassThroughPanics:        true,
+		DontPropagateTermination: false,
 	}
 }
 

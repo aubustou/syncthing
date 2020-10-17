@@ -99,8 +99,8 @@ func (a *App) Start() error {
 	// Create a main service manager. We'll add things to this as we go along.
 	// We want any logging it does to go through our log system.
 	spec := util.Spec()
-	spec.Log = func(line string) {
-		l.Debugln(line)
+	spec.EventHook = func(e suture.Event) {
+		l.Debugln(e)
 	}
 	a.mainService = suture.New("main", spec)
 

@@ -133,8 +133,8 @@ type service struct {
 
 func NewService(cfg config.Wrapper, myID protocol.DeviceID, mdl Model, tlsCfg *tls.Config, discoverer discover.Finder, bepProtocolName string, tlsDefaultCommonName string, evLogger events.Logger) Service {
 	spec := util.Spec()
-	spec.Log = func(line string) {
-		l.Infoln(line)
+	spec.EventHook = func(e suture.Event) {
+		l.Infoln(e)
 	}
 	service := &service{
 		Supervisor:              suture.New("connections.Service", spec),
@@ -161,8 +161,8 @@ func NewService(cfg config.Wrapper, myID protocol.DeviceID, mdl Model, tlsCfg *t
 		// due to config are done by removing and adding services, so are
 		// not subject to these limitations.
 		listenerSupervisor: suture.New("c.S.listenerSupervisor", suture.Spec{
-			Log: func(line string) {
-				l.Infoln(line)
+			EventHook: func(e suture.Event) {
+				l.Infoln(e)
 			},
 			FailureThreshold:  2,
 			FailureBackoff:    600 * time.Second,

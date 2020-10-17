@@ -182,8 +182,8 @@ var (
 // for file data without altering the local folder in any way.
 func NewModel(cfg config.Wrapper, id protocol.DeviceID, clientName, clientVersion string, ldb *db.Lowlevel, protectedFiles []string, evLogger events.Logger) Model {
 	spec := util.Spec()
-	spec.Log = func(line string) {
-		l.Debugln(line)
+	spec.EventHook = func(e suture.Event) {
+		l.Debugln(e)
 	}
 	m := &model{
 		Supervisor: suture.New("model", spec),

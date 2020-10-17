@@ -51,8 +51,8 @@ func newCast(name string) *cast {
 	spec.FailureThreshold = 2
 	spec.FailureBackoff = 60 * time.Second
 	// Only log restarts in debug mode.
-	spec.Log = func(line string) {
-		l.Debugln(line)
+	spec.EventHook = func(e suture.Event) {
+		l.Debugln(e)
 	}
 	c := &cast{
 		Supervisor: suture.New(name, spec),
