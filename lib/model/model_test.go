@@ -126,7 +126,7 @@ func newState(cfg config.Configuration) *testModel {
 	m := setupModel(wcfg)
 
 	for _, dev := range cfg.Devices {
-		m.AddConnection(&fakeConnection{id: dev.DeviceID, model: m}, protocol.HelloResult{})
+		m.AddConnection(&fakeConnection{id: dev.DeviceID, model: m}, protocol.Hello{})
 	}
 
 	return m
@@ -254,7 +254,7 @@ func BenchmarkRequestOut(b *testing.B) {
 	for _, f := range files {
 		fc.addFile(f.Name, 0644, protocol.FileInfoTypeFile, []byte("some data to return"))
 	}
-	m.AddConnection(fc, protocol.HelloResult{})
+	m.AddConnection(fc, protocol.Hello{})
 	m.Index(device1, "default", files)
 
 	b.ResetTimer()
@@ -292,7 +292,7 @@ func BenchmarkRequestInSingleFile(b *testing.B) {
 }
 
 func TestDeviceRename(t *testing.T) {
-	hello := protocol.HelloResult{
+	hello := protocol.Hello{
 		ClientName:    "syncthing",
 		ClientVersion: "v0.9.4",
 	}
@@ -1665,10 +1665,9 @@ func TestRWScanRecovery(t *testing.T) {
 }
 
 func TestGlobalDirectoryTree(t *testing.T) {
-	db := db.NewLowlevel(backend.OpenMemory())
-	m := newModel(defaultCfgWrapper, myID, "syncthing", "dev", db, nil)
-	m.ServeBackground()
-	defer cleanupModel(m)
+	w, fcfg := tmpDefaultWrapper()
+	m := setupModel(w)
+	defer cleanupModelAndRemoveDir(m, fcfg.Filesystem().URI())
 
 	b := func(isfile bool, path ...string) protocol.FileInfo {
 		typ := protocol.FileInfoTypeDirectory
@@ -1916,10 +1915,9 @@ func TestGlobalDirectoryTree(t *testing.T) {
 }
 
 func TestGlobalDirectorySelfFixing(t *testing.T) {
-	db := db.NewLowlevel(backend.OpenMemory())
-	m := newModel(defaultCfgWrapper, myID, "syncthing", "dev", db, nil)
-	m.ServeBackground()
-	defer cleanupModel(m)
+	w, fcfg := tmpDefaultWrapper()
+	m := setupModel(w)
+	defer cleanupModelAndRemoveDir(m, fcfg.Filesystem().URI())
 
 	b := func(isfile bool, path ...string) protocol.FileInfo {
 		typ := protocol.FileInfoTypeDirectory
@@ -2313,9 +2311,9 @@ func TestSharedWithClearedOnDisconnect(t *testing.T) {
 	defer cleanupModel(m)
 
 	conn1 := &fakeConnection{id: device1, model: m}
-	m.AddConnection(conn1, protocol.HelloResult{})
+	m.AddConnection(conn1, protocol.Hello{})
 	conn2 := &fakeConnection{id: device2, model: m}
-	m.AddConnection(conn2, protocol.HelloResult{})
+	m.AddConnection(conn2, protocol.Hello{})
 
 	m.ClusterConfig(device1, protocol.ClusterConfig{
 		Folders: []protocol.Folder{
@@ -3331,7 +3329,7 @@ func TestConnCloseOnRestart(t *testing.T) {
 
 	br := &testutils.BlockingRW{}
 	nw := &testutils.NoopRW{}
-	m.AddConnection(newFakeProtoConn(protocol.NewConnection(device1, br, nw, m, "testConn", protocol.CompressNever)), protocol.HelloResult{})
+	m.AddConnection(newFakeProtoConn(protocol.NewConnection(device1, br, nw, m, "testConn", protocol.CompressionNever)), protocol.Hello{})
 	m.pmut.RLock()
 	if len(m.closed) != 1 {
 		t.Fatalf("Expected just one conn (len(m.conn) == %v)", len(m.conn))
@@ -3339,17 +3337,19 @@ func TestConnCloseOnRestart(t *testing.T) {
 	closed := m.closed[device1]
 	m.pmut.RUnlock()
 
-	newFcfg := fcfg.Copy()
-	newFcfg.Paused = true
+	waiter, err := w.RemoveDevice(device1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan struct{})
 	go func() {
-		m.restartFolder(fcfg, newFcfg, false)
+		waiter.Wait()
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Timed out before folder restart returned")
+		t.Fatal("Timed out before config took effect")
 	}
 	select {
 	case <-closed:
@@ -3845,8 +3845,8 @@ func TestScanRenameCaseOnly(t *testing.T) {
 	})
 }
 
-func TestConnectionTerminationOnFolderAdd(t *testing.T) {
-	testConfigChangeClosesConnections(t, false, true, nil, func(cfg config.Wrapper) {
+func TestClusterConfigOnFolderAdd(t *testing.T) {
+	testConfigChangeTriggersClusterConfigs(t, false, true, nil, func(cfg config.Wrapper) {
 		fcfg := testFolderConfigTmp()
 		fcfg.ID = "second"
 		fcfg.Label = "second"
@@ -3859,8 +3859,8 @@ func TestConnectionTerminationOnFolderAdd(t *testing.T) {
 	})
 }
 
-func TestConnectionTerminationOnFolderShare(t *testing.T) {
-	testConfigChangeClosesConnections(t, true, true, nil, func(cfg config.Wrapper) {
+func TestClusterConfigOnFolderShare(t *testing.T) {
+	testConfigChangeTriggersClusterConfigs(t, true, true, nil, func(cfg config.Wrapper) {
 		fcfg := cfg.FolderList()[0]
 		fcfg.Devices = []config.FolderDeviceConfiguration{{device2, protocol.EmptyDeviceID}}
 		if w, err := cfg.SetFolder(fcfg); err != nil {
@@ -3871,8 +3871,8 @@ func TestConnectionTerminationOnFolderShare(t *testing.T) {
 	})
 }
 
-func TestConnectionTerminationOnFolderUnshare(t *testing.T) {
-	testConfigChangeClosesConnections(t, true, false, nil, func(cfg config.Wrapper) {
+func TestClusterConfigOnFolderUnshare(t *testing.T) {
+	testConfigChangeTriggersClusterConfigs(t, true, false, nil, func(cfg config.Wrapper) {
 		fcfg := cfg.FolderList()[0]
 		fcfg.Devices = nil
 		if w, err := cfg.SetFolder(fcfg); err != nil {
@@ -3883,8 +3883,8 @@ func TestConnectionTerminationOnFolderUnshare(t *testing.T) {
 	})
 }
 
-func TestConnectionTerminationOnFolderRemove(t *testing.T) {
-	testConfigChangeClosesConnections(t, true, false, nil, func(cfg config.Wrapper) {
+func TestClusterConfigOnFolderRemove(t *testing.T) {
+	testConfigChangeTriggersClusterConfigs(t, true, false, nil, func(cfg config.Wrapper) {
 		rcfg := cfg.RawCopy()
 		rcfg.Folders = nil
 		if w, err := cfg.Replace(rcfg); err != nil {
@@ -3895,8 +3895,8 @@ func TestConnectionTerminationOnFolderRemove(t *testing.T) {
 	})
 }
 
-func TestConnectionTerminationOnFolderPause(t *testing.T) {
-	testConfigChangeClosesConnections(t, true, false, nil, func(cfg config.Wrapper) {
+func TestClusterConfigOnFolderPause(t *testing.T) {
+	testConfigChangeTriggersClusterConfigs(t, true, false, nil, func(cfg config.Wrapper) {
 		fcfg := cfg.FolderList()[0]
 		fcfg.Paused = true
 		if w, err := cfg.SetFolder(fcfg); err != nil {
@@ -3907,8 +3907,8 @@ func TestConnectionTerminationOnFolderPause(t *testing.T) {
 	})
 }
 
-func TestConnectionTerminationOnFolderUnpause(t *testing.T) {
-	testConfigChangeClosesConnections(t, true, false, func(cfg config.Wrapper) {
+func TestClusterConfigOnFolderUnpause(t *testing.T) {
+	testConfigChangeTriggersClusterConfigs(t, true, false, func(cfg config.Wrapper) {
 		fcfg := cfg.FolderList()[0]
 		fcfg.Paused = true
 		if w, err := cfg.SetFolder(fcfg); err != nil {
@@ -3929,16 +3929,16 @@ func TestConnectionTerminationOnFolderUnpause(t *testing.T) {
 
 func TestAddFolderCompletion(t *testing.T) {
 	// Empty folders are always 100% complete.
-	comp := newFolderCompletion(db.Counts{}, db.Counts{})
-	comp.add(newFolderCompletion(db.Counts{}, db.Counts{}))
+	comp := newFolderCompletion(db.Counts{}, db.Counts{}, 0)
+	comp.add(newFolderCompletion(db.Counts{}, db.Counts{}, 0))
 	if comp.CompletionPct != 100 {
 		t.Error(comp.CompletionPct)
 	}
 
 	// Completion is of the whole
-	comp = newFolderCompletion(db.Counts{Bytes: 100}, db.Counts{})             // 100% complete
-	comp.add(newFolderCompletion(db.Counts{Bytes: 400}, db.Counts{Bytes: 50})) // 82.5% complete
-	if comp.CompletionPct != 90 {                                              // 100 * (1 - 50/500)
+	comp = newFolderCompletion(db.Counts{Bytes: 100}, db.Counts{}, 0)             // 100% complete
+	comp.add(newFolderCompletion(db.Counts{Bytes: 400}, db.Counts{Bytes: 50}, 0)) // 82.5% complete
+	if comp.CompletionPct != 90 {                                                 // 100 * (1 - 50/500)
 		t.Error(comp.CompletionPct)
 	}
 }
@@ -3984,7 +3984,7 @@ func TestScanDeletedROChangedOnSR(t *testing.T) {
 	}
 }
 
-func testConfigChangeClosesConnections(t *testing.T, expectFirstClosed, expectSecondClosed bool, pre func(config.Wrapper), fn func(config.Wrapper)) {
+func testConfigChangeTriggersClusterConfigs(t *testing.T, expectFirst, expectSecond bool, pre func(config.Wrapper), fn func(config.Wrapper)) {
 	t.Helper()
 	wcfg, _ := tmpDefaultWrapper()
 	m := setupModel(wcfg)
@@ -3999,21 +3999,146 @@ func testConfigChangeClosesConnections(t *testing.T, expectFirstClosed, expectSe
 		pre(wcfg)
 	}
 
-	fc1 := &fakeConnection{id: device1, model: m}
-	fc2 := &fakeConnection{id: device2, model: m}
-	m.AddConnection(fc1, protocol.HelloResult{})
-	m.AddConnection(fc2, protocol.HelloResult{})
+	cc1 := make(chan struct{}, 1)
+	cc2 := make(chan struct{}, 1)
+	fc1 := &fakeConnection{
+		id:    device1,
+		model: m,
+		clusterConfigFn: func(_ protocol.ClusterConfig) {
+			cc1 <- struct{}{}
+		},
+	}
+	fc2 := &fakeConnection{
+		id:    device2,
+		model: m,
+		clusterConfigFn: func(_ protocol.ClusterConfig) {
+			cc2 <- struct{}{}
+		},
+	}
+	m.AddConnection(fc1, protocol.Hello{})
+	m.AddConnection(fc2, protocol.Hello{})
+
+	// Initial CCs
+	select {
+	case <-cc1:
+	default:
+		t.Fatal("missing initial CC from device1")
+	}
+	select {
+	case <-cc2:
+	default:
+		t.Fatal("missing initial CC from device2")
+	}
 
 	t.Log("Applying config change")
 
 	fn(wcfg)
 
-	if expectFirstClosed != fc1.closed {
-		t.Errorf("first connection state mismatch: %t (expected) != %t", expectFirstClosed, fc1.closed)
+	timeout := time.NewTimer(time.Second)
+	if expectFirst {
+		select {
+		case <-cc1:
+		case <-timeout.C:
+			t.Errorf("timed out before receiving cluste rconfig for first device")
+		}
 	}
+	if expectSecond {
+		select {
+		case <-cc2:
+		case <-timeout.C:
+			t.Errorf("timed out before receiving cluste rconfig for second device")
+		}
+	}
+}
 
-	if expectSecondClosed != fc2.closed {
-		t.Errorf("second connection state mismatch: %t (expected) != %t", expectSecondClosed, fc2.closed)
+// The end result of the tested scenario is that the global version entry has an
+// empty version vector and is not deleted, while everything is actually deleted.
+// That then causes these files to be considered as needed, while they are not.
+// https://github.com/syncthing/syncthing/issues/6961
+func TestIssue6961(t *testing.T) {
+	wcfg, fcfg := tmpDefaultWrapper()
+	tfs := fcfg.Filesystem()
+	wcfg.SetDevice(config.NewDeviceConfiguration(device2, "device2"))
+	fcfg.Type = config.FolderTypeReceiveOnly
+	fcfg.Devices = append(fcfg.Devices, config.FolderDeviceConfiguration{DeviceID: device2})
+	wcfg.SetFolder(fcfg)
+	// Always recalc/repair when opening a fileset.
+	// db := db.NewLowlevel(backend.OpenMemory(), db.WithRecheckInterval(time.Millisecond))
+	db := db.NewLowlevel(backend.OpenMemory())
+	m := newModel(wcfg, myID, "syncthing", "dev", db, nil)
+	m.ServeBackground()
+	defer cleanupModelAndRemoveDir(m, tfs.URI())
+	m.ScanFolders()
+
+	name := "foo"
+	version := protocol.Vector{}.Update(device1.Short())
+
+	// Remote, valid and existing file
+	m.Index(device1, fcfg.ID, []protocol.FileInfo{{Name: name, Version: version, Sequence: 1}})
+	// Remote, invalid (receive-only) and existing file
+	m.Index(device2, fcfg.ID, []protocol.FileInfo{{Name: name, RawInvalid: true, Sequence: 1}})
+	// Create a local file
+	if fd, err := tfs.OpenFile(name, fs.OptCreate, 0666); err != nil {
+		t.Fatal(err)
+	} else {
+		fd.Close()
+	}
+	if info, err := tfs.Lstat(name); err != nil {
+		t.Fatal(err)
+	} else {
+		l.Infoln("intest", info.Mode)
+	}
+	m.ScanFolders()
+
+	// Get rid of valid global
+	waiter, err := wcfg.RemoveDevice(device1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter.Wait()
+
+	// Delete the local file
+	must(t, tfs.Remove(name))
+	m.ScanFolders()
+
+	// Drop ther remote index, add some other file.
+	m.Index(device2, fcfg.ID, []protocol.FileInfo{{Name: "bar", RawInvalid: true, Sequence: 1}})
+
+	// Pause and unpause folder to create new db.FileSet and thus recalculate everything
+	fcfg.Paused = true
+	waiter, err = wcfg.SetFolder(fcfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter.Wait()
+	fcfg.Paused = false
+	waiter, err = wcfg.SetFolder(fcfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter.Wait()
+
+	if comp := m.Completion(device2, fcfg.ID); comp.NeedDeletes != 0 {
+		t.Error("Expected 0 needed deletes, got", comp.NeedDeletes)
+	} else {
+		t.Log(comp)
+	}
+}
+
+func TestCompletionEmptyGlobal(t *testing.T) {
+	wcfg, fcfg := tmpDefaultWrapper()
+	m := setupModel(wcfg)
+	defer cleanupModelAndRemoveDir(m, fcfg.Filesystem().URI())
+	files := []protocol.FileInfo{{Name: "foo", Version: protocol.Vector{}.Update(myID.Short()), Sequence: 1}}
+	m.fmut.Lock()
+	m.folderFiles[fcfg.ID].Update(protocol.LocalDeviceID, files)
+	m.fmut.Unlock()
+	files[0].Deleted = true
+	files[0].Version = files[0].Version.Update(device1.Short())
+	m.IndexUpdate(device1, fcfg.ID, files)
+	comp := m.Completion(protocol.LocalDeviceID, fcfg.ID)
+	if comp.CompletionPct != 95 {
+		t.Error("Expected completion of 95%, got", comp.CompletionPct)
 	}
 }
 

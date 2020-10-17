@@ -38,13 +38,6 @@ func (f *sendOnlyFolder) PullErrors() []FileError {
 
 // pull checks need for files that only differ by metadata (no changes on disk)
 func (f *sendOnlyFolder) pull() bool {
-	select {
-	case <-f.initialScanFinished:
-	default:
-		// Once the initial scan finished, a pull will be scheduled
-		return false
-	}
-
 	batch := make([]protocol.FileInfo, 0, maxBatchSizeFiles)
 	batchSizeBytes := 0
 
@@ -70,6 +63,7 @@ func (f *sendOnlyFolder) pull() bool {
 		if !ok {
 			if intf.IsDeleted() {
 				l.Debugln("Should never get a deleted file as needed when we don't have it")
+				f.evLogger.Log(events.Failure, "got deleted file that doesn't exist locally as needed when pulling on send-only")
 			}
 			return true
 		}

@@ -20,7 +20,7 @@ import (
 	"github.com/syncthing/syncthing/lib/sync"
 )
 
-type EventType int
+type EventType int64
 
 const (
 	Starting EventType = 1 << iota
@@ -51,6 +51,7 @@ const (
 	FolderWatchStateChanged
 	ListenAddressesChanged
 	LoginAttempt
+	Failure
 
 	AllEvents = (1 << iota) - 1
 )
@@ -120,6 +121,8 @@ func (t EventType) String() string {
 		return "LoginAttempt"
 	case FolderWatchStateChanged:
 		return "FolderWatchStateChanged"
+	case Failure:
+		return "Failure"
 	default:
 		return "Unknown"
 	}
@@ -199,6 +202,8 @@ func UnmarshalEventType(s string) EventType {
 		return LoginAttempt
 	case "FolderWatchStateChanged":
 		return FolderWatchStateChanged
+	case "Failure":
+		return Failure
 	default:
 		return 0
 	}

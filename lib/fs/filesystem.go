@@ -91,8 +91,8 @@ func (fm FileMode) String() string {
 
 // Usage represents filesystem space usage
 type Usage struct {
-	Free  int64
-	Total int64
+	Free  uint64
+	Total uint64
 }
 
 type Matcher interface {
@@ -234,7 +234,7 @@ func Canonicalize(file string) (string, error) {
 		// The relative path may pretend to be an absolute path within
 		// the root, but the double path separator on Windows implies
 		// something else and is out of spec.
-		return "", ErrNotRelative
+		return "", errNotRelative
 	}
 
 	// The relative path should be clean from internal dotdots and similar
@@ -244,10 +244,10 @@ func Canonicalize(file string) (string, error) {
 	// It is not acceptable to attempt to traverse upwards.
 	switch file {
 	case "..":
-		return "", ErrNotRelative
+		return "", errNotRelative
 	}
 	if strings.HasPrefix(file, ".."+pathSep) {
-		return "", ErrNotRelative
+		return "", errNotRelative
 	}
 
 	if strings.HasPrefix(file, pathSep) {
@@ -258,4 +258,20 @@ func Canonicalize(file string) (string, error) {
 	}
 
 	return file, nil
+}
+
+// unwrapFilesystem removes "wrapping" filesystems to expose the underlying filesystem.
+func unwrapFilesystem(fs Filesystem) Filesystem {
+	for {
+		switch sfs := fs.(type) {
+		case *logFilesystem:
+			fs = sfs.Filesystem
+		case *walkFilesystem:
+			fs = sfs.Filesystem
+		case *MtimeFS:
+			fs = sfs.Filesystem
+		default:
+			return sfs
+		}
+	}
 }
