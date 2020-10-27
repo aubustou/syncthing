@@ -159,7 +159,7 @@ func (t *quicListener) URI() *url.URL {
 }
 
 func (t *quicListener) WANAddresses() []*url.URL {
-	uris := t.LANAddresses()
+	uris := []*url.URL{t.uri}
 	t.mut.Lock()
 	if t.address != nil {
 		uris = append(uris, t.address)
